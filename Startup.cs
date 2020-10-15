@@ -1,3 +1,5 @@
+using ApiOfficeAttendance.Repository;
+using ApiOfficeAttendance.Repository.AzureTableStorage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -45,6 +47,7 @@ namespace ApiOfficeAttendance
                 options.AddPolicy(PolicyPermissions.WriteOwnAttendance, policy => policy.RequireClaim("permissions", PolicyPermissions.WriteOwnAttendance));
             });
 
+            services.AddTransient<IAvailabilityRepository, AvailabilityRepository>();
         
             services.AddMvc();
            
