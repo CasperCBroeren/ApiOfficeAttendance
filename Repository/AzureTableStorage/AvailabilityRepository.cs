@@ -3,12 +3,15 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Azure.Cosmos.Table;
 using Microsoft.Extensions.Configuration;
+using Prometheus;
 
 namespace ApiOfficeAttendance.Repository.AzureTableStorage
 {
     public class AvailabilityRepository : IAvailabilityRepository
     {
         private readonly IConfiguration configuration;
+        private readonly Histogram storage_retrieval_seconds = Metrics.CreateHistogram("officeattendance_storage_retrieval_seconds", "The amount of seconds to get data from tablestorage", "organization");
+
         public string TableName { get; }
 
         public AvailabilityRepository(IConfiguration configuration)
@@ -19,6 +22,7 @@ namespace ApiOfficeAttendance.Repository.AzureTableStorage
 
         public async IAsyncEnumerable<PersonInOffice> Find(DateTime startDate, string organization, int maxDays)
         {
+            var start = DateTime.Now;
             var tableQuery = new TableQuery<PersonInOffice> {TakeCount = maxDays};
             tableQuery.Where(TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.GreaterThanOrEqual, startDate.Date.Ticks.ToString()));
             var table = await this.CreateTable(organization);
@@ -33,6 +37,9 @@ namespace ApiOfficeAttendance.Repository.AzureTableStorage
 
                 token = result.ContinuationToken;
             } while (token != null);
+
+            var end = DateTime.Now.Subtract(start).TotalSeconds;
+            storage_retrieval_seconds.Observe(end);
         }
 
         public async Task Add(string organization, PersonInOffice item)

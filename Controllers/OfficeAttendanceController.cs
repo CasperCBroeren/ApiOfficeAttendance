@@ -7,29 +7,29 @@ using ApiOfficeAttendance.Repository;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Prometheus;
 
 namespace ApiOfficeAttendance.Controllers
 {
     [ApiController]
     [Route("[controller]")]
     public class OfficeAttendanceController : ControllerBase
-    {
-
-        private readonly ILogger<OfficeAttendanceController> _logger;
+    { 
         private readonly IAvailabilityRepository _availabilityRepository;
 
-        public OfficeAttendanceController(ILogger<OfficeAttendanceController> logger,
-            IAvailabilityRepository availabilityRepository)
-        {
-            _logger = logger;
-            _availabilityRepository = availabilityRepository;
+        private readonly Gauge _attendance = Metrics.CreateGauge("officeattendance_attendance_total", "The amount of people attending an office", "organization");
+        
+        public OfficeAttendanceController(IAvailabilityRepository availabilityRepository)
+        { 
+            _availabilityRepository = availabilityRepository; 
         }
 
         [HttpGet]
         [Authorize(PolicyPermissions.ReadAttendance)]
         public async Task<AppData> Get()
-        { 
-            var savedItems = await GetInOfficeAvailables();
+        {
+            var nameOfOrganisation = "test";
+            var savedItems = await GetInOfficeAvailability(nameOfOrganisation);
             var items = new List<InOfficeAvailable>();
 
             for (var i = 0; i < 14; i++)
@@ -56,10 +56,13 @@ namespace ApiOfficeAttendance.Controllers
         [Authorize(PolicyPermissions.WriteOwnAttendance)]
         public async Task Set([FromBody]OfficeAvailableMutation mutation)
         {
+            var nameOfOrganisation = "test";
             var nameOfPerson = User.Claims.First(x => x.Type == "http://officeattendan.ce/name").Value;
-            var theDay = await GetInOfficeAvailableOrCreate(mutation.DateAsString, nameOfPerson);  
+            var theDay = await GetInOfficeAvailableOrCreate(mutation.DateAsString, nameOfOrganisation, nameOfPerson);  
 
-            await _availabilityRepository.Add("test", theDay);
+            await _availabilityRepository.Add(nameOfOrganisation, theDay);
+            var savedItems = await GetInOfficeAvailability(nameOfOrganisation);
+            _attendance.Labels(nameOfOrganisation).Set(savedItems.Count());
         }
 
         [Route("remove")]
@@ -67,30 +70,33 @@ namespace ApiOfficeAttendance.Controllers
         [Authorize(PolicyPermissions.WriteOwnAttendance)]
         public async Task Remove([FromBody] OfficeAvailableMutation mutation)
         {
+            var nameOfOrganisation = "test";
             var nameOfPerson = User.Claims.First(x => x.Type == "http://officeattendan.ce/name").Value;
-            var theDay = await GetInOfficeAvailableOrCreate(mutation.DateAsString, nameOfPerson); 
+            var theDay = await GetInOfficeAvailableOrCreate(mutation.DateAsString, nameOfOrganisation, nameOfPerson); 
 
             await _availabilityRepository.Remove("test",theDay);
+            var savedItems = await GetInOfficeAvailability(nameOfOrganisation);
+            _attendance.Set(savedItems.Count());
+            _attendance.Labels(nameOfOrganisation).Set(savedItems.Count());
         }
 
-        private async Task<PersonInOffice> GetInOfficeAvailableOrCreate(string dateAsString, string person)
-        {
+        private async Task<PersonInOffice> GetInOfficeAvailableOrCreate(string dateAsString, string organisation, string person)
+        { 
             var selectedDate = DateTime.ParseExact(dateAsString, "MM/dd/yyyy", CultureInfo.InvariantCulture);
-            var items = await GetInOfficeAvailables();
+            var items = await GetInOfficeAvailability(organisation);
             var theDay = items.FirstOrDefault(x => x.Date == selectedDate.Date && x.Person == person);
             if (theDay == null)
             {
-                theDay = new PersonInOffice(selectedDate,person);
-                theDay.ETag = "*";
+                theDay = new PersonInOffice(selectedDate, person) {ETag = "*"};
             }
 
             return theDay;
         }
 
-        private async Task<List<PersonInOffice>> GetInOfficeAvailables()
+        private async Task<List<PersonInOffice>> GetInOfficeAvailability(string organisation)
         {
             var items = new List<PersonInOffice>();
-            await foreach (var item in _availabilityRepository.Find(DateTime.Now, "test", 14))
+            await foreach (var item in _availabilityRepository.Find(DateTime.Now, organisation, 14))
             {
                 items.Add(item);
             }
